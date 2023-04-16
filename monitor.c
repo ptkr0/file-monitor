@@ -10,7 +10,16 @@
 #include <linux/limits.h>
 #include <assert.h>
 #include <fcntl.h>
-   
+#include <sys/sendfile.h>
+
+#define BUF_SIZE 4096*1000
+
+/* 10 MB is the default value */
+int COPY_THRESHOLD = 10*100000;
+
+/* 5 min sleep time is the default value */
+int MIMIR_TIME = 5*60;
+
 static void skeleton_daemon()
 {
     pid_t pid;
@@ -64,7 +73,7 @@ static void skeleton_daemon()
     openlog ("file-monitor", LOG_PID, LOG_DAEMON);
 }
 
-void validate_path(char* path)
+void validate_path(const char* path)
 {
     struct stat STATS;
 
@@ -96,7 +105,7 @@ void add_slash(char *path)
     }
 }
 
-int check_if_is_a_file (const char* path)
+int is_file(const char* path)
 {
     struct stat st;
     
@@ -107,51 +116,104 @@ int check_if_is_a_file (const char* path)
         return 0;
 }
 
-void read_write_copy(char *path, char *dest_path)
+void read_write_copy(const char *src_path, const char *dest_path)
 {
-    int src_fd, dst_fd, n, err;
-    unsigned char buffer[4096];
-    char * src_path, dst_path;
+    int src_file, dest_file, n, err;
+    unsigned char buffer[BUF_SIZE];
+    struct stat stat_buf;
 
-    src_fd = open(path, O_RDONLY);
-    dst_fd = open(dest_path, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    src_file = open(src_path, O_RDONLY);
+
+    /* fstat helps to find file permissions */
+    fstat(src_file, &stat_buf); 
+    dest_file = open(dest_path, O_WRONLY | O_CREAT, stat_buf.st_mode);
 
     while (1) {
-        err = read(src_fd, buffer, 4096);
+        err = read(src_file, buffer, sizeof(buffer));
+        
         if (err == -1) {
-            syslog(LOG_ERR, "Error when writing to file %s.", path);
-            exit(EXIT_FAILURE);
+            syslog(LOG_ERR, "Error: unable to copy file %s.", src_path);
+            break;
         }
         n = err;
 
         if (n == 0) break;
 
-        err = write(dst_fd, buffer, n);
+        err = write(dest_file, buffer, n);
         if (err == -1) {
-            syslog(LOG_ERR, "Error when writing to file %s.", path);
-            exit(EXIT_FAILURE);
+            syslog(LOG_ERR, "Error: unable to copy file %s.", src_path);
+            break;
         }
     }
 
-    syslog(LOG_NOTICE, "Successfully copied file %s", path);
-    close(src_fd);
-    close(dst_fd);
+    syslog(LOG_NOTICE, "Successfully copied file %s", src_path);
+    close(src_file);
+    close(dest_file);
+}
+
+void sendile_copy(const char *src_path, const char *dest_path)
+{
+    int src_file, dest_file, n;
+    unsigned char buffer[BUF_SIZE];
+    struct stat stat_buf;
+
+    src_file = open(src_path, O_RDONLY);
+
+    /* fstat helps to find file permissions */
+    fstat(src_file, &stat_buf); 
+    dest_file = open(dest_path, O_WRONLY | O_CREAT, stat_buf.st_mode);
+
+    n = 1;
+    while (n > 0) 
+    {
+        if (n == -1) {
+            syslog(LOG_ERR, "Error when copying file %s.", src_path);
+            break;
+        }
+        n = sendfile(dest_file, src_file, 0, BUF_SIZE);
+    }
+
+    close(src_file);
+    close(dest_file);
+}
+
+int file_size(const char* path)
+{
+    int size;
+    struct stat st;
+
+    lstat (path, &st);
+    return size = st.st_size;
+}
+
+void remove_file(const char* file_path)
+{
+    int rem = remove(file_path);
+    if (rem == 0)
+    {
+        syslog(LOG_NOTICE, "Successfully delete file %s", file_path);
+    }
+    else
+    {
+        syslog(LOG_ERR, "Error: unable to delete file %s", file_path);
+    }
 }
 
 void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
     
     DIR* dir;
+    int file_s;
     struct dirent* entry;
-    char entry_path[PATH_MAX + 1];
+    char src_path[PATH_MAX + 1];
     char dest_path[PATH_MAX + 1];
-    size_t path_len, path2_len;
+    size_t src_path_len, dest_path_len;
 
-    /* Copy the directory path into entry_path. */
-    strncpy (entry_path, SOURCE_PATH, sizeof (entry_path));
+    /* Copy the directory path into src_path and dest_path */
+    strncpy (src_path, SOURCE_PATH, sizeof (src_path));
     strncpy (dest_path, DESTINATION_PATH, sizeof (dest_path));
 
-    path_len = strlen (SOURCE_PATH);
-    path2_len = strlen (DESTINATION_PATH);
+    src_path_len = strlen (SOURCE_PATH);
+    dest_path_len = strlen (DESTINATION_PATH);
 
     /* Start the listing operation of the directory specified on the command line. */
     dir = opendir (SOURCE_PATH);
@@ -160,12 +222,24 @@ void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
     while ((entry = readdir (dir)) != NULL) {
 
         /* Build the path to the directory entry by appending the entry name to the path name. */
-        strncpy (entry_path + path_len, entry->d_name, sizeof (entry_path) - path_len);
-        strncpy (dest_path + path2_len, entry->d_name, sizeof (dest_path) - path2_len);
+        strncpy (src_path + src_path_len, entry->d_name, sizeof (src_path) - src_path_len);
+
+        /* In theory, the path to the target file will be the same, so we can save it right away */
+        strncpy (dest_path + dest_path_len, entry->d_name, sizeof (dest_path) - dest_path_len);
 
         /* Check if entry is a regular file - if so copy it */
-        if (check_if_is_a_file (entry_path))
-            read_write_copy(entry_path, dest_path);
+        if (is_file (src_path))
+        {
+            file_s = file_size(src_path);
+            if(file_s > COPY_THRESHOLD)
+            {
+                sendile_copy (src_path, dest_path);
+            }
+            else
+            {
+                read_write_copy (src_path, dest_path);
+            }
+        }
     }
 
     /* All done. */
@@ -177,9 +251,20 @@ int main(int argc, char* argv[])
     skeleton_daemon();
 
     /* ./{daemon name} source_path destination_path */
-    if (argc != 3) 
+    if (argc == 3) 
     {
-        syslog(LOG_ERR, "You provided an incorrect number of arguments!");
+        syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+    }
+
+    if (argc == 4) 
+    {
+        COPY_THRESHOLD = atoi(argv[3]) * 100000;
+        syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+    }
+
+    if (argc != 3 && argc != 4)
+    {
+        syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
         exit(EXIT_FAILURE);
     }
 

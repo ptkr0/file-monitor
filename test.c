@@ -11,6 +11,8 @@
 #include <assert.h>
 #include <fcntl.h>
 
+int COPY_THRESHOLD = 10*100000;
+
 void validate_path(char *path)
 {
     struct stat STATS;
@@ -36,7 +38,7 @@ void add_slash(char *path)
     }
 }
 
-int check_if_is_a_file (const char* path)
+int is_file(const char* path)
 {
     struct stat st;
     
@@ -45,6 +47,15 @@ int check_if_is_a_file (const char* path)
         return 1;
     else
         return 0;
+}
+
+int file_size(const char* path)
+{
+    int size;
+    struct stat st;
+
+    lstat (path, &st);
+    return size = st.st_size;
 }
 
 void read_write_copy(char *path, char *dest_path)
@@ -77,6 +88,19 @@ void read_write_copy(char *path, char *dest_path)
     close(dst_fd);
 }
 
+void remove_file(const char* file_path)
+{
+    int rem = remove(file_path);
+    if (rem == 0)
+    {
+        printf("usunieto plik: %s", file_path);
+    }
+    else
+    {
+        printf("blad przy usuwaniu plik");
+    }
+}
+
 void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
     
     DIR* dir;
@@ -102,9 +126,19 @@ void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
         strncpy (entry_path + path_len, entry->d_name, sizeof (entry_path) - path_len);
         strncpy (dest_path + path2_len, entry->d_name, sizeof (dest_path) - path2_len);
 
+        int file_s;
         /* Determine the type of the entry. */
-        if (check_if_is_a_file (entry_path))
+        if (is_file (entry_path))
+        {
+            file_s = file_size(entry_path);
+            printf("wielkosc pliku %s: %d\n", entry_path, file_s);
             read_write_copy(entry_path, dest_path);
+            sleep(5);
+            remove_file(dest_path);
+                
+        }
+
+        
     }
 
     /* All done. */
@@ -114,10 +148,15 @@ void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
 int main(int argc, char *argv[])
 {
     /* if there was no arguments provided */
-    if (argc != 3) 
+    if (argc == 3) 
     {
-        printf("zla liczba argumentow\n");
-        exit(EXIT_FAILURE);
+        printf("prog przy ktorym zmienia sie sposob kopiowania plikow to: %d megabajtow\n", COPY_THRESHOLD/100000);
+    }
+    if (argc == 4) 
+    {
+        COPY_THRESHOLD = atoi(argv[3]) * 100000;
+        printf("prog przy ktorym zmienia sie sposob kopiowania plikow to: %d megabajtow\n", COPY_THRESHOLD/100000);
+
     }
 
     /* at first determinate length of the argument, then use strcpy to copy contents into allocated memory */
@@ -137,4 +176,5 @@ int main(int argc, char *argv[])
     validate_path(DESTINATION_PATH);
 
     list_directory(SOURCE_PATH, DESTINATION_PATH);
+
 }
