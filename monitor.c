@@ -151,7 +151,7 @@ void read_write_copy(const char *src_path, const char *dest_path)
     close(dest_file);
 }
 
-void sendile_copy(const char *src_path, const char *dest_path)
+void sendfile_copy(const char *src_path, const char *dest_path)
 {
     int src_file, dest_file, n;
     unsigned char buffer[BUF_SIZE];
@@ -233,7 +233,7 @@ void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
             file_s = file_size(src_path);
             if(file_s > COPY_THRESHOLD)
             {
-                sendile_copy (src_path, dest_path);
+                sendfile_copy (src_path, dest_path);
             }
             else
             {
