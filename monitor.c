@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <sys/sendfile.h>
+#include <openssl/sha.h>
 
 #define BUF_SIZE 4096*1000
 
@@ -151,7 +152,7 @@ void read_write_copy(const char *src_path, const char *dest_path)
     close(dest_file);
 }
 
-void sendile_copy(const char *src_path, const char *dest_path)
+void sendfile_copy(const char *src_path, const char *dest_path)
 {
     int src_file, dest_file, n;
     unsigned char buffer[BUF_SIZE];
@@ -233,7 +234,7 @@ void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
             file_s = file_size(src_path);
             if(file_s > COPY_THRESHOLD)
             {
-                sendile_copy (src_path, dest_path);
+                sendfile_copy (src_path, dest_path);
             }
             else
             {
@@ -244,6 +245,47 @@ void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
 
     /* All done. */
     closedir (dir);
+}
+
+
+int checksumck(char *file1, char *file2) {
+    FILE *src;
+    /*Definition of SHA256_CTX struct*/
+    SHA256_CTX c1,c2;
+    char buf[SHA256_DIGEST_LENGTH];
+    ssize_t size, out_writer;
+    unsigned char out[2][SHA256_DIGEST_LENGTH];
+
+    /*Initialization of SHA256_CTX struct*/
+    SHA256_Init(&c1);
+    SHA256_Init(&c2);
+
+    /*File open*/
+    src = fopen(file1, "r");
+    assert(src != NULL);
+    /*Size for Update function */
+    while((size = fread(buf, 1, SHA256_DIGEST_LENGTH, src)) != 0) {
+    /*Hash update*/
+        SHA256_Update(&c1, buf, size);
+    }
+    /*Returns string and deletes SHA256_CTX*/
+    SHA256_Final(out[0], &c1);
+
+    src = fopen(file2, "r");
+    assert(src != NULL);
+    while((size = fread(buf, 1, SHA256_DIGEST_LENGTH, src)) != 0) {
+        SHA256_Update(&c2, buf, size);
+    }
+    SHA256_Final(out[0], &c1);
+    fclose(src);
+    /*Comparing 2 hashes*/
+    if(memcmp(out[0],out[1],SHA256_DIGEST_LENGTH)==0){
+        return 1;
+    }
+    else{
+        syslog(LOG_ERR, "Checksums not the same! %s.", file2);
+        return 0;
+    }
 }
 
 int main(int argc, char* argv[])
