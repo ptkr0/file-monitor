@@ -101,6 +101,23 @@ void remove_file(const char* file_path)
     }
 }
 
+int is_dir_empty(const char *dirname) {
+    
+    DIR *dir;
+    dir = opendir(dirname);
+    int count = 0;
+    struct dirent *entry;
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (++count > 2) {
+            break;
+        }
+    }
+
+    closedir(dir);
+    return (count <= 2);
+}
+
 void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
     
     DIR* dir;
@@ -175,6 +192,15 @@ int main(int argc, char *argv[])
     validate_path(SOURCE_PATH);
     validate_path(DESTINATION_PATH);
 
-    list_directory(SOURCE_PATH, DESTINATION_PATH);
+    if (is_dir_empty(DESTINATION_PATH))
+    {
+        printf("katalog docelowy jest pusty like");
+    }
+    else
+    {
+        printf("katalog docelowy nie jest pusty sadeg");
+    }
+
+    /*list_directory(SOURCE_PATH, DESTINATION_PATH);*/
 
 }

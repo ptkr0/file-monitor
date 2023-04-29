@@ -15,6 +15,10 @@
 
 #define BUF_SIZE 4096*1000
 
+#define FIRST_COPY 1
+#define REGULAR_CHECK 2
+#define DEST_CHECK 3
+
 /* 10 MB is the default value */
 int COPY_THRESHOLD = 10*100000;
 
@@ -178,6 +182,7 @@ void sendfile_copy(const char *src_path, const char *dest_path)
     close(dest_file);
 }
 
+/* this function returns size of a file*/
 int file_size(const char* path)
 {
     int size;
@@ -200,53 +205,20 @@ void remove_file(const char* file_path)
     }
 }
 
-void list_directory(const char* SOURCE_PATH, const char* DESTINATION_PATH) {
-    
-    DIR* dir;
+/* this function copies file from source dir to dest dir*/
+void copy_file(char* src_path, char* dest_path)
+{
     int file_s;
-    struct dirent* entry;
-    char src_path[PATH_MAX + 1];
-    char dest_path[PATH_MAX + 1];
-    size_t src_path_len, dest_path_len;
-
-    /* Copy the directory path into src_path and dest_path */
-    strncpy (src_path, SOURCE_PATH, sizeof (src_path));
-    strncpy (dest_path, DESTINATION_PATH, sizeof (dest_path));
-
-    src_path_len = strlen (SOURCE_PATH);
-    dest_path_len = strlen (DESTINATION_PATH);
-
-    /* Start the listing operation of the directory specified on the command line. */
-    dir = opendir (SOURCE_PATH);
-
-    /* Loop over all directory entries. */
-    while ((entry = readdir (dir)) != NULL) {
-
-        /* Build the path to the directory entry by appending the entry name to the path name. */
-        strncpy (src_path + src_path_len, entry->d_name, sizeof (src_path) - src_path_len);
-
-        /* In theory, the path to the target file will be the same, so we can save it right away */
-        strncpy (dest_path + dest_path_len, entry->d_name, sizeof (dest_path) - dest_path_len);
-
-        /* Check if entry is a regular file - if so copy it */
-        if (is_file (src_path))
-        {
-            file_s = file_size(src_path);
-            if(file_s > COPY_THRESHOLD)
-            {
-                sendfile_copy (src_path, dest_path);
-            }
-            else
-            {
-                read_write_copy (src_path, dest_path);
-            }
-        }
+    file_s = file_size(src_path);
+    if(file_s > COPY_THRESHOLD)
+    {
+        sendfile_copy (src_path, dest_path);
     }
-
-    /* All done. */
-    closedir (dir);
+    else
+    {
+        read_write_copy (src_path, dest_path);
+    }
 }
-
 
 int checksumck(char *file1, char *file2) {
     FILE *src;
@@ -288,6 +260,115 @@ int checksumck(char *file1, char *file2) {
     }
 }
 
+int is_dir_empty(const char* dirpath) {
+    
+    DIR *dir;
+    dir = opendir(dirpath);
+    int count = 0;
+    struct dirent *entry;
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (++count > 2) {
+            break;
+        }
+    }
+
+    closedir(dir);
+    return (count <= 2);
+}
+
+int file_exists(const char* filepath) {
+
+    if (access(filepath, F_OK) != -1)
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+/* we go through path_comparing and we compare it to files in path_to_compare dir*/
+void list_directory(const char* path_comparing, const char* path_to_compare, int STATUS) {
+    
+    DIR* dir;
+    struct dirent* entry;
+    char src_path[PATH_MAX + 1];
+    char dest_path[PATH_MAX + 1];
+    size_t src_path_len, dest_path_len;
+
+    /* Copy the directory paths into src_path and dest_path */
+    strncpy (src_path, path_comparing, sizeof (src_path));
+    strncpy (dest_path, path_to_compare, sizeof (dest_path));
+
+    src_path_len = strlen (path_comparing);
+    dest_path_len = strlen (path_to_compare);
+
+    /* Start the listing operation of the directory specified on the command line. */
+    dir = opendir (path_comparing);
+
+    /* Loop over all directory entries. */
+    while ((entry = readdir (dir)) != NULL) {
+
+        /* Build the path to the directory entry by appending the entry name to the path name. */
+        strncpy (src_path + src_path_len, entry->d_name, sizeof (src_path) - src_path_len);
+
+        /* In theory, the path to the target file will be the same, so we can save it right away */
+        strncpy (dest_path + dest_path_len, entry->d_name, sizeof (dest_path) - dest_path_len);
+
+        /* depending on the status flag this function will work differently*/
+        if (STATUS == FIRST_COPY)
+        {
+            /* Check if entry is a regular file - if so copy it */
+            if (is_file (src_path))
+            {
+                copy_file(src_path, dest_path);
+            }
+        }
+
+        else if (STATUS == REGULAR_CHECK)
+        {
+            if (is_file(src_path))
+            {
+                if (file_exists(dest_path))
+                {
+                    if (checksumck(src_path, dest_path))
+                    {
+                        /* file is a regular file and has a copy in dest folder and checksums are the same -- file wasn't modified so we don't have to do anything*/
+                    }
+                    else
+                    {
+                        /* file is a regular file and has a copy in dest folder, but checksums aren't the same -- file was modified so we delete the old file and copy the one */
+                        remove_file(dest_path);
+                        copy_file(src_path, dest_path);
+                        syslog(LOG_NOTICE, "File %s was modified between checks.", src_path);
+                    }
+                }
+                else
+                {
+                    /* file is a regular file, but doesn't have a copy in dest folder -- we copy it */
+                    copy_file(src_path, dest_path);
+                }
+            }
+        }
+
+        else if (STATUS == DEST_CHECK)
+        {
+            /* we go through dest dir and look if the same filenames are in the src dir -- if something is not in the src dir anymore we delete it from dest dir*/
+            if (file_exists(src_path) && !(file_exists(dest_path)))
+            {
+                remove_file(src_path);
+            }
+        }
+        
+        
+    }
+
+    /* All done. */
+    closedir (dir);
+}
+
 int main(int argc, char* argv[])
 {
     skeleton_daemon();
@@ -326,13 +407,25 @@ int main(int argc, char* argv[])
     validate_path(SOURCE_PATH);
     validate_path(DESTINATION_PATH);
 
+    if (!(is_dir_empty(DESTINATION_PATH)))
+    {
+      syslog (LOG_ERR, "Error: Destination directory has to be empty for daemon to work properly");
+      exit(EXIT_FAILURE);  
+    }
+
     /* atm list_directory checks SOURCE_PATH directory and copies all regular files to DESTINATION_PATH*/
-    list_directory(SOURCE_PATH, DESTINATION_PATH);
+    list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY);
+    syslog(LOG_NOTICE, "First check complete!");
+    sleep(20);
     
     while (1)
     {
-        syslog(LOG_NOTICE, "working");
-        sleep(5);
+        validate_path(SOURCE_PATH);
+        validate_path(DESTINATION_PATH);
+        list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK);
+        syslog(LOG_NOTICE, "Regular check complete!");
+        list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK);
+        syslog(LOG_NOTICE, "Destination check complete!");
         break;
     }
    
