@@ -12,12 +12,19 @@
 #include <fcntl.h>
 #include <sys/sendfile.h>
 #include <openssl/sha.h>
+#include <stdbool.h>
 
 #define BUF_SIZE 4096*1000
 
 #define FIRST_COPY 1
 #define REGULAR_CHECK 2
 #define DEST_CHECK 3
+
+#define USER_TRIGGER SIGUSR1
+
+bool FIRST_CHECK = false;
+
+volatile int user_input_check = 0;
 
 /* 10 MB is the default value */
 int COPY_THRESHOLD = 10*100000;
@@ -156,6 +163,15 @@ void read_write_copy(const char *src_path, const char *dest_path)
     close(dest_file);
 }
 
+void signal_handler(int signal)
+{
+    if (signal == USER_TRIGGER)
+    {
+        syslog(LOG_INFO, "File check requested by user.");
+        user_input_check = 1;
+    }
+}
+
 void sendfile_copy(const char *src_path, const char *dest_path)
 {
     int src_file, dest_file, n;
@@ -234,7 +250,7 @@ int checksumck(char *file1, char *file2) {
 
     /*File open*/
     src = fopen(file1, "r");
-    assert(src != NULL);
+
     /*Size for Update function */
     while((size = fread(buf, 1, SHA256_DIGEST_LENGTH, src)) != 0) {
     /*Hash update*/
@@ -244,7 +260,8 @@ int checksumck(char *file1, char *file2) {
     SHA256_Final(out[0], &c1);
 
     src = fopen(file2, "r");
-    assert(src != NULL);
+
+
     while((size = fread(buf, 1, SHA256_DIGEST_LENGTH, src)) != 0) {
         SHA256_Update(&c2, buf, size);
     }
@@ -334,7 +351,7 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
             {
                 if (file_exists(dest_path))
                 {
-                    if (checksumck(src_path, dest_path)==1)
+                    if (checksumck(src_path, dest_path) ==1 )
                     {
                         /* file is a regular file and has a copy in dest folder and checksums are the same -- file wasn't modified so we don't have to do anything*/
                     }
@@ -392,6 +409,8 @@ int main(int argc, char* argv[])
         exit(EXIT_FAILURE);
     }
 
+    signal(USER_TRIGGER, signal_handler);
+
     /* at first determinate length of the argument, then use strcpy to copy contents into allocated memory */
     char SOURCE_PATH[strlen(argv[1]) + 1];
     strcpy(SOURCE_PATH, argv[1]);
@@ -414,20 +433,35 @@ int main(int argc, char* argv[])
       exit(EXIT_FAILURE);  
     }
 
-    /* atm list_directory checks SOURCE_PATH directory and copies all regular files to DESTINATION_PATH*/
-    list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY);
-    syslog(LOG_NOTICE, "First check complete!");
-    sleep(20);
-    
     while (1)
     {
-        validate_path(SOURCE_PATH);
-        validate_path(DESTINATION_PATH);
-        list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK);
-        syslog(LOG_NOTICE, "Regular check complete!");
-        list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK);
-        syslog(LOG_NOTICE, "Destination check complete!");
-        break;
+        int i = 0;
+        while ( i < 1 )
+        {
+            if (FIRST_CHECK == false)
+            {
+                list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY);
+                syslog(LOG_NOTICE, "Daemon has successfully created first directory copy!");
+                FIRST_CHECK = true;
+            }
+            else if (FIRST_CHECK == true)
+            {
+                validate_path(SOURCE_PATH);
+                validate_path(DESTINATION_PATH);
+                list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK);
+                syslog(LOG_NOTICE, "Regular check complete!");
+                list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK);
+                syslog(LOG_NOTICE, "Destination check complete!");
+            }
+            sleep(MIMIR_TIME);
+            
+            /* we check if user send a message, if he does then user_input_check value changes to 1, when that happens we restart the loop */
+            if (user_input_check == 1)
+            {
+                i = 0;
+                continue;
+            }
+        }  
     }
    
     syslog (LOG_NOTICE, "File monitor terminated.");
