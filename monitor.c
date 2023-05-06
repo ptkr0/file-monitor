@@ -248,10 +248,11 @@ int checksumck(char *file1, char *file2) {
     while((size = fread(buf, 1, SHA256_DIGEST_LENGTH, src)) != 0) {
         SHA256_Update(&c2, buf, size);
     }
-    SHA256_Final(out[0], &c1);
+    SHA256_Final(out[1], &c2);
     fclose(src);
     /*Comparing 2 hashes*/
     if(memcmp(out[0],out[1],SHA256_DIGEST_LENGTH)==0){
+        syslog(LOG_ERR, "Checksums match!");
         return 1;
     }
     else{
@@ -333,7 +334,7 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
             {
                 if (file_exists(dest_path))
                 {
-                    if (checksumck(src_path, dest_path))
+                    if (checksumck(src_path, dest_path)==1)
                     {
                         /* file is a regular file and has a copy in dest folder and checksums are the same -- file wasn't modified so we don't have to do anything*/
                     }
