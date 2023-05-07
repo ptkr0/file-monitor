@@ -12,12 +12,19 @@
 #include <fcntl.h>
 #include <sys/sendfile.h>
 #include <openssl/sha.h>
+#include <stdbool.h>
 
 #define BUF_SIZE 4096*1000
 
 #define FIRST_COPY 1
 #define REGULAR_CHECK 2
 #define DEST_CHECK 3
+
+#define USER_TRIGGER SIGUSR1
+
+bool FIRST_CHECK = false;
+
+volatile int user_input_check = 0;
 
 /* 10 MB is the default value */
 int COPY_THRESHOLD = 10*100000;
@@ -28,52 +35,52 @@ int MIMIR_TIME = 5*60;
 static void skeleton_daemon()
 {
     pid_t pid;
-    
+
     /* Fork off the parent process */
     pid = fork();
-    
+
     /* An error occurred */
     if (pid < 0)
         exit(EXIT_FAILURE);
-    
+
      /* Success: Let the parent terminate */
     if (pid > 0)
         exit(EXIT_SUCCESS);
-    
+
     /* On success: The child process becomes session leader */
     if (setsid() < 0)
         exit(EXIT_FAILURE);
-    
+
     /* Catch, ignore and handle signals */
     /*TODO: Implement a working signal handler */
     signal(SIGCHLD, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
-    
+
     /* Fork off for the second time*/
     pid = fork();
-    
+
     /* An error occurred */
     if (pid < 0)
         exit(EXIT_FAILURE);
-    
+
     /* Success: Let the parent terminate */
     if (pid > 0)
         exit(EXIT_SUCCESS);
-    
+
     /* Set new file permissions */
     umask(0);
-    
+
     /* Change the working directory to the root directory */
     /* or another appropriated directory */
     chdir("/");
-    
+
     /* Close all open file descriptors */
     int x;
     for (x = sysconf(_SC_OPEN_MAX); x>=0; x--)
     {
         close (x);
     }
-    
+
     /* Open the log file */
     openlog ("file-monitor", LOG_PID, LOG_DAEMON);
 }
@@ -102,7 +109,7 @@ void validate_path(const char* path)
 
 }
 
-void add_slash(char *path) 
+void add_slash(char *path)
 {
     if (path[strlen(path) - 1] != '/')
     {
@@ -113,7 +120,7 @@ void add_slash(char *path)
 int is_file(const char* path)
 {
     struct stat st;
-    
+
     lstat (path, &st);
     if (S_ISREG (st.st_mode))
         return 1;
@@ -130,12 +137,12 @@ void read_write_copy(const char *src_path, const char *dest_path)
     src_file = open(src_path, O_RDONLY);
 
     /* fstat helps to find file permissions */
-    fstat(src_file, &stat_buf); 
+    fstat(src_file, &stat_buf);
     dest_file = open(dest_path, O_WRONLY | O_CREAT, stat_buf.st_mode);
 
     while (1) {
         err = read(src_file, buffer, sizeof(buffer));
-        
+
         if (err == -1) {
             syslog(LOG_ERR, "Error: unable to copy file %s.", src_path);
             break;
@@ -156,6 +163,15 @@ void read_write_copy(const char *src_path, const char *dest_path)
     close(dest_file);
 }
 
+void signal_handler(int signal)
+{
+    if (signal == USER_TRIGGER)
+    {
+        syslog(LOG_INFO, "File check requested by user.");
+        user_input_check = 1;
+    }
+}
+
 void sendfile_copy(const char *src_path, const char *dest_path)
 {
     int src_file, dest_file, n;
@@ -165,11 +181,11 @@ void sendfile_copy(const char *src_path, const char *dest_path)
     src_file = open(src_path, O_RDONLY);
 
     /* fstat helps to find file permissions */
-    fstat(src_file, &stat_buf); 
+    fstat(src_file, &stat_buf);
     dest_file = open(dest_path, O_WRONLY | O_CREAT, stat_buf.st_mode);
 
     n = 1;
-    while (n > 0) 
+    while (n > 0)
     {
         if (n == -1) {
             syslog(LOG_ERR, "Error when copying file %s.", src_path);
@@ -234,7 +250,7 @@ int checksumck(char *file1, char *file2) {
 
     /*File open*/
     src = fopen(file1, "r");
-    assert(src != NULL);
+
     /*Size for Update function */
     while((size = fread(buf, 1, SHA256_DIGEST_LENGTH, src)) != 0) {
     /*Hash update*/
@@ -244,7 +260,8 @@ int checksumck(char *file1, char *file2) {
     SHA256_Final(out[0], &c1);
 
     src = fopen(file2, "r");
-    assert(src != NULL);
+
+
     while((size = fread(buf, 1, SHA256_DIGEST_LENGTH, src)) != 0) {
         SHA256_Update(&c2, buf, size);
     }
@@ -262,7 +279,7 @@ int checksumck(char *file1, char *file2) {
 }
 
 int is_dir_empty(const char* dirpath) {
-    
+
     DIR *dir;
     dir = opendir(dirpath);
     int count = 0;
@@ -292,7 +309,7 @@ int file_exists(const char* filepath) {
 
 /* we go through path_comparing and we compare it to files in path_to_compare dir*/
 void list_directory(const char* path_comparing, const char* path_to_compare, int STATUS) {
-    
+
     DIR* dir;
     struct dirent* entry;
     char src_path[PATH_MAX + 1];
@@ -334,7 +351,7 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
             {
                 if (file_exists(dest_path))
                 {
-                    if (checksumck(src_path, dest_path)==1)
+                    if (checksumck(src_path, dest_path) ==1 )
                     {
                         /* file is a regular file and has a copy in dest folder and checksums are the same -- file wasn't modified so we don't have to do anything*/
                     }
@@ -362,8 +379,8 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
                 remove_file(src_path);
             }
         }
-        
-        
+
+
     }
 
     /* All done. */
@@ -375,12 +392,12 @@ int main(int argc, char* argv[])
     skeleton_daemon();
 
     /* ./{daemon name} source_path destination_path */
-    if (argc == 3) 
+    if (argc == 3)
     {
         syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
     }
 
-    if (argc == 4) 
+    if (argc == 4)
     {
         COPY_THRESHOLD = atoi(argv[3]) * 100000;
         syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
@@ -391,6 +408,8 @@ int main(int argc, char* argv[])
         syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
         exit(EXIT_FAILURE);
     }
+
+    signal(USER_TRIGGER, signal_handler);
 
     /* at first determinate length of the argument, then use strcpy to copy contents into allocated memory */
     char SOURCE_PATH[strlen(argv[1]) + 1];
@@ -411,27 +430,38 @@ int main(int argc, char* argv[])
     if (!(is_dir_empty(DESTINATION_PATH)))
     {
       syslog (LOG_ERR, "Error: Destination directory has to be empty for daemon to work properly");
-      exit(EXIT_FAILURE);  
+      exit(EXIT_FAILURE);
     }
 
-    /* atm list_directory checks SOURCE_PATH directory and copies all regular files to DESTINATION_PATH*/
-    list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY);
-    syslog(LOG_NOTICE, "First check complete!");
-    sleep(20);
-    
     while (1)
     {
-        validate_path(SOURCE_PATH);
-        validate_path(DESTINATION_PATH);
-        list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK);
-        syslog(LOG_NOTICE, "Regular check complete!");
-        list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK);
-        syslog(LOG_NOTICE, "Destination check complete!");
-        break;
+        user_input_check = 0;
+        if (FIRST_CHECK == false)
+        {
+            list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY);
+            syslog(LOG_NOTICE, "Daemon has successfully created first directory copy!");
+            FIRST_CHECK = true;
+        }
+        else if (FIRST_CHECK == true)
+        {
+            validate_path(SOURCE_PATH);
+            validate_path(DESTINATION_PATH);
+            list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK);
+            syslog(LOG_NOTICE, "Regular check complete!");
+            list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK);
+            syslog(LOG_NOTICE, "Destination check complete!");
+        }
+        sleep(MIMIR_TIME);
+
+        /* we check if user send a message, if he does then user_input_check value changes to 1, when that happens we restart the loop */
+        if (user_input_check == 1)
+        {
+            continue;
+        }
     }
-   
+
     syslog (LOG_NOTICE, "File monitor terminated.");
     closelog();
-    
+
     return EXIT_SUCCESS;
 }
