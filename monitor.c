@@ -485,41 +485,26 @@ int main(int argc, char* argv[])
     for (int i = optind; i < argc; i++) {
         puts(argv[i]);
     }
-    syslog(LOG_NOTICE,"%d",optind);
+    int i = 0;
+    if(option=='r')
+        i=4;
+    else
+        i=3;
     skeleton_daemon();
     /* ./{daemon name} source_path destination_path */
-    if(option=='r'){
-        if (argc == 4){
+        if (argc == i){
             syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
         }
-        else if(argc == 5){
-        COPY_THRESHOLD = atoi(argv[4]) * 100000;
+        else if(argc == i+1){
+        COPY_THRESHOLD = atoi(argv[i]) * 100000;
         syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
         }
-        else if (argc != 4 && argc != 5)
+        else if (argc != i && argc != i+1)
         {
             syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
             exit(EXIT_FAILURE);
         }
-    }
-    else {
-        if (argc == 3)
-        {
-            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
-        }
-
-        if (argc == 4)
-        {
-            COPY_THRESHOLD = atoi(argv[3]) * 100000;
-            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
-        }
-
-        if (argc != 3 && argc != 4)
-        {
-            syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
-            exit(EXIT_FAILURE);
-        }
-    }
+    
 
     signal(USER_TRIGGER, signal_handler);
 
