@@ -8,21 +8,25 @@
 #include <string.h>
 #include <dirent.h>
 #include <linux/limits.h>
-#include <assert.h>
 #include <fcntl.h>
 #include <sys/sendfile.h>
 #include <openssl/sha.h>
 #include <stdbool.h>
+#include <getopt.h>
 
 #define BUF_SIZE 4096*1000
 
 #define FIRST_COPY 1
 #define REGULAR_CHECK 2
 #define DEST_CHECK 3
+#define FIRST_COPY_REC 4
+#define REGULAR_CHECK_REC 5
+#define DEST_CHECK_REC 6
 
 #define USER_TRIGGER SIGUSR1
 
 bool FIRST_CHECK = false;
+bool FIRST_CHECK_REC = false;
 
 volatile int user_input_check = 0;
 
@@ -123,6 +127,17 @@ int is_file(const char* path)
 
     lstat (path, &st);
     if (S_ISREG (st.st_mode))
+        return 1;
+    else
+        return 0;
+}
+
+int is_dir(const char* path)
+{
+    struct stat st;
+
+    lstat (path, &st);
+    if (S_ISDIR (st.st_mode))
         return 1;
     else
         return 0;
@@ -307,12 +322,14 @@ int file_exists(const char* filepath) {
     }
 }
 
+
 /* we go through path_comparing and we compare it to files in path_to_compare dir*/
 void list_directory(const char* path_comparing, const char* path_to_compare, int STATUS) {
 
     DIR* dir;
     struct dirent* entry;
     char src_path[PATH_MAX + 1];
+   
     char dest_path[PATH_MAX + 1];
     size_t src_path_len, dest_path_len;
 
@@ -335,6 +352,9 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
         /* In theory, the path to the target file will be the same, so we can save it right away */
         strncpy (dest_path + dest_path_len, entry->d_name, sizeof (dest_path) - dest_path_len);
 
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                    continue;
+        }
         /* depending on the status flag this function will work differently*/
         if (STATUS == FIRST_COPY)
         {
@@ -342,6 +362,22 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
             if (is_file (src_path))
             {
                 copy_file(src_path, dest_path);
+            }
+        }
+
+        else if (STATUS == FIRST_COPY_REC)
+        {
+            /* Check if entry is a regular file - if so copy it */
+            if (is_file (src_path))
+            {
+                copy_file(src_path, dest_path);
+            }
+            else if (is_dir(src_path)){
+                mkdir(dest_path, 0700);
+                syslog(LOG_NOTICE, "%s, %s", src_path,dest_path);
+                add_slash(src_path);
+                add_slash(dest_path);
+                list_directory(src_path,dest_path,FIRST_COPY_REC);
             }
         }
 
@@ -371,6 +407,45 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
             }
         }
 
+        else if (STATUS == REGULAR_CHECK_REC)
+        {
+            if (is_file(src_path))
+            {
+                if (file_exists(dest_path))
+                {
+                    if (checksumck(src_path, dest_path) ==1 )
+                    {
+                        /* file is a regular file and has a copy in dest folder and checksums are the same -- file wasn't modified so we don't have to do anything*/
+                    }
+                    else
+                    {
+                        /* file is a regular file and has a copy in dest folder, but checksums aren't the same -- file was modified so we delete the old file and copy the one */
+                        remove_file(dest_path);
+                        copy_file(src_path, dest_path);
+                        syslog(LOG_NOTICE, "File %s was modified between checks.", src_path);
+                    }
+                }
+                else
+                {
+                    /* file is a regular file, but doesn't have a copy in dest folder -- we copy it */
+                    copy_file(src_path, dest_path);
+                }
+            }
+            if (is_dir(src_path))
+            {
+                if (file_exists(dest_path))
+                {
+                    add_slash(src_path);
+                    add_slash(dest_path);
+                    list_directory(src_path,dest_path,REGULAR_CHECK_REC);
+                }
+                else
+                {
+                    /* file is a regular file, but doesn't have a copy in dest folder -- we copy it */
+                    mkdir(dest_path, 0700);
+                }
+            }
+        }
         else if (STATUS == DEST_CHECK)
         {
             /* we go through dest dir and look if the same filenames are in the src dir -- if something is not in the src dir anymore we delete it from dest dir*/
@@ -379,7 +454,23 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
                 remove_file(src_path);
             }
         }
+        else if (STATUS == DEST_CHECK_REC)
+        {
+                syslog(LOG_NOTICE, "chj");
 
+            /* we go through dest dir and look if the same filenames are in the src dir -- if something is not in the src dir anymore we delete it from dest dir*/
+            if (file_exists(src_path) && !(file_exists(dest_path)))
+            {
+                if(is_dir(src_path)){
+                add_slash(src_path);
+                syslog(LOG_NOTICE, "chj1");
+                list_directory(src_path,dest_path,DEST_CHECK_REC);
+                }
+                else
+                syslog(LOG_NOTICE, "chj2");
+                    remove_file(src_path);
+            }
+        }
 
     }
 
@@ -389,34 +480,55 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
 
 int main(int argc, char* argv[])
 {
+    /*defining a variable used in handling options*/
+    int option=getopt(argc,argv,"r");
+    for (int i = optind; i < argc; i++) {
+        puts(argv[i]);
+    }
+    syslog(LOG_NOTICE,"%d",optind);
     skeleton_daemon();
-
     /* ./{daemon name} source_path destination_path */
-    if (argc == 3)
-    {
+    if(option=='r'){
+        if (argc == 4){
+            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+        }
+        else if(argc == 5){
+        COPY_THRESHOLD = atoi(argv[4]) * 100000;
         syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+        }
+        else if (argc != 4 && argc != 5)
+        {
+            syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
+            exit(EXIT_FAILURE);
+        }
     }
+    else {
+        if (argc == 3)
+        {
+            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+        }
 
-    if (argc == 4)
-    {
-        COPY_THRESHOLD = atoi(argv[3]) * 100000;
-        syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
-    }
+        if (argc == 4)
+        {
+            COPY_THRESHOLD = atoi(argv[3]) * 100000;
+            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+        }
 
-    if (argc != 3 && argc != 4)
-    {
-        syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
-        exit(EXIT_FAILURE);
+        if (argc != 3 && argc != 4)
+        {
+            syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
+            exit(EXIT_FAILURE);
+        }
     }
 
     signal(USER_TRIGGER, signal_handler);
 
     /* at first determinate length of the argument, then use strcpy to copy contents into allocated memory */
-    char SOURCE_PATH[strlen(argv[1]) + 1];
-    strcpy(SOURCE_PATH, argv[1]);
+    char SOURCE_PATH[strlen(argv[optind]) + 1];
+    strcpy(SOURCE_PATH, argv[optind]);
 
-    char DESTINATION_PATH[strlen(argv[2]) + 1];
-    strcpy(DESTINATION_PATH, argv[2]);
+    char DESTINATION_PATH[strlen(argv[optind+1]) + 1];
+    strcpy(DESTINATION_PATH, argv[optind+1]);
 
     /* we check if '/' is at the end of the argument given by the user */
     add_slash(SOURCE_PATH);
@@ -432,31 +544,60 @@ int main(int argc, char* argv[])
       syslog (LOG_ERR, "Error: Destination directory has to be empty for daemon to work properly");
       exit(EXIT_FAILURE);
     }
+    if(option=='r'){
+           while (1)
+            {
+                user_input_check = 0;
+                if (FIRST_CHECK_REC == false)
+                {
+                    list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY_REC);
+                    syslog(LOG_NOTICE, "Daemon has successfully created first directory copy_rec!");
+                    FIRST_CHECK_REC = true;
+                }
+                else if (FIRST_CHECK_REC == true)
+                {
+                    validate_path(SOURCE_PATH);
+                    validate_path(DESTINATION_PATH);
+                    list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK_REC);
+                    syslog(LOG_NOTICE, "Regular check complete!_rec");
+                    list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK_REC);
+                    syslog(LOG_NOTICE, "Destination check complete!_rec");
+                }
+                sleep(MIMIR_TIME);
 
-    while (1)
-    {
-        user_input_check = 0;
-        if (FIRST_CHECK == false)
+                /* we check if user send a message, if he does then user_input_check value changes to 1, when that happens we restart the loop */
+                if (user_input_check == 1)
+                {
+                    continue;
+                }
+            }
+    }
+    else{
+        while (1)
         {
-            list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY);
-            syslog(LOG_NOTICE, "Daemon has successfully created first directory copy!");
-            FIRST_CHECK = true;
-        }
-        else if (FIRST_CHECK == true)
-        {
-            validate_path(SOURCE_PATH);
-            validate_path(DESTINATION_PATH);
-            list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK);
-            syslog(LOG_NOTICE, "Regular check complete!");
-            list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK);
-            syslog(LOG_NOTICE, "Destination check complete!");
-        }
-        sleep(MIMIR_TIME);
+            user_input_check = 0;
+            if (FIRST_CHECK == false)
+            {
+                list_directory(SOURCE_PATH, DESTINATION_PATH, FIRST_COPY);
+                syslog(LOG_NOTICE, "Daemon has successfully created first directory copy!");
+                FIRST_CHECK = true;
+            }
+            else if (FIRST_CHECK == true)
+            {
+                validate_path(SOURCE_PATH);
+                validate_path(DESTINATION_PATH);
+                list_directory(SOURCE_PATH, DESTINATION_PATH, REGULAR_CHECK);
+                syslog(LOG_NOTICE, "Regular check complete!");
+                list_directory(DESTINATION_PATH, SOURCE_PATH, DEST_CHECK);
+                syslog(LOG_NOTICE, "Destination check complete!");
+            }
+            sleep(MIMIR_TIME);
 
-        /* we check if user send a message, if he does then user_input_check value changes to 1, when that happens we restart the loop */
-        if (user_input_check == 1)
-        {
-            continue;
+            /* we check if user send a message, if he does then user_input_check value changes to 1, when that happens we restart the loop */
+            if (user_input_check == 1)
+            {
+                continue;
+            }
         }
     }
 
