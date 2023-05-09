@@ -310,8 +310,11 @@ int is_dir_empty(const char* dirpath) {
     return (count <= 2);
 }
 
-int file_exists(const char* filepath) {
+int file_exists(char* filepath) {
 
+    if(is_dir(filepath)){
+        add_slash(filepath);
+    }
     if (access(filepath, F_OK) != -1)
     {
         return 1;
@@ -456,23 +459,24 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
         }
         else if (STATUS == DEST_CHECK_REC)
         {
-        syslog(LOG_NOTICE, "%s // %s",src_path,dest_path);
         if(is_dir(src_path)){
-            if(is_dir_empty(src_path)){
+            if (file_exists(src_path) && !(file_exists(dest_path))){
+                if(is_dir_empty(src_path)){
                 rmdir(src_path);
+                }
+                else{
+                list_directory(src_path,dest_path,DEST_CHECK_REC);
+                }
             }
             else{
-                add_slash(src_path);
-                add_slash(dest_path);
-                syslog(LOG_NOTICE, "%s // %s",src_path,dest_path);
                 list_directory(src_path,dest_path,DEST_CHECK_REC);
             }
+
         }
             /* we go through dest dir and look if the same filenames are in the src dir -- if something is not in the src dir anymore we delete it from dest dir*/
         else{
             if (file_exists(src_path) && !(file_exists(dest_path)))
             {
-                    syslog(LOG_NOTICE, "%s // %s",src_path,dest_path);
                     remove_file(src_path);
             }
         }
@@ -488,9 +492,6 @@ int main(int argc, char* argv[])
 {
     /*defining a variable used in handling options*/
     int option=getopt(argc,argv,"r");
-    for (int i = optind; i < argc; i++) {
-        puts(argv[i]);
-    }
     int i = 0;
     if(option=='r')
         i=4;
