@@ -488,8 +488,72 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
     closedir (dir);
 }
 
+int * THR_TM(char* option){
+    char * token,s;
+    int * wynik;
+    int ck;
+    if(strlen(option)==1&&option[0]==':'){
+        ck=0;
+    }
+    else{
+        for(int i=0;i<strlen(option);i++)
+        {
+            
+            if(option[i]==':')
+            {
+                if(i==0)
+                {
+                    ck=1;
+                    break;
+                }
+                else if(i==strlen(option)-1)
+                {
+                    ck=2;
+                    break;
+                }
+                else
+                {
+                    ck=3;
+                    break;
+                }
+            }
+            
+        }
+    }
+    if (ck==1){
+        token=strtok(option,":");
+        wynik=malloc(sizeof(int)*2);
+        wynik[0]=ck;
+        wynik[1]=atoi(token);
+    }
+    else if(ck==2){
+        token=strtok(option,":");
+        wynik=malloc(sizeof(int)*2);
+        wynik[0]=ck;
+        wynik[1]=atoi(token);
+    }
+    else if (ck==3) {
+        token=strtok(option,":");
+        wynik=malloc(sizeof(int)*3);
+        wynik[0]=ck;
+        wynik[1]=atoi(token);
+        token=strtok(NULL,":");
+        wynik[2]=atoi(token);
+    }
+    else {
+        wynik=malloc(sizeof(int)*1);
+        wynik[0]=0;
+    }
+
+    return wynik;
+
+}
+
+
+
 int main(int argc, char* argv[])
 {
+    skeleton_daemon();
     /*defining a variable used in handling options*/
     int option=getopt(argc,argv,"r");
     int i = 0;
@@ -497,20 +561,49 @@ int main(int argc, char* argv[])
         i=4;
     else
         i=3;
-    skeleton_daemon();
     /* ./{daemon name} source_path destination_path */
-        if (argc == i){
-            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
-        }
-        else if(argc == i+1){
-        COPY_THRESHOLD = atoi(argv[i]) * 100000;
+    if (argc == i){
         syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+        syslog(LOG_NOTICE, "Using default sleep timer: %d s", MIMIR_TIME);
+    }
+    else if(argc == i+1)
+    {
+        int* tmp_val=THR_TM(argv[i]);
+        if(tmp_val[0]==0){
+            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+            syslog(LOG_NOTICE, "Using default sleep timer: %d s", MIMIR_TIME);
         }
-        else if (argc != i && argc != i+1)
+        else if(tmp_val[0]==1)
         {
-            syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>");
-            exit(EXIT_FAILURE);
+            MIMIR_TIME=tmp_val[1];
+            syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
+            syslog(LOG_NOTICE, "Using custom sleep timer: %d s", MIMIR_TIME);
         }
+        else if(tmp_val[0]==2)
+        {
+            COPY_THRESHOLD=tmp_val[1]*100000;
+            syslog(LOG_NOTICE, "Using custom threshold value: %d MB", COPY_THRESHOLD/100000);
+            syslog(LOG_NOTICE, "Using default sleep timer: %d s", MIMIR_TIME);
+        }
+        else if(tmp_val[0]==3)
+        {
+            COPY_THRESHOLD=tmp_val[1]*100000;
+            MIMIR_TIME=tmp_val[2];
+            syslog(LOG_NOTICE, "Using custom threshold value: %d MB", COPY_THRESHOLD/100000);
+            syslog(LOG_NOTICE, "Using custom sleep timer: %d s", MIMIR_TIME);
+        }
+        else
+        { 
+        syslog(LOG_ERR, "Invalid number of arguments or wrong formatting <source path> <destination path> opt: <threshold size>:<sleep timer>");
+        exit(EXIT_FAILURE);
+        }
+        free(tmp_val);
+    }
+    else if (argc != i && argc != i+1)
+    {
+        syslog(LOG_ERR, "Invalid number of arguments <source path> <destination path> opt: <threshold size>:<sleep timer>");
+        exit(EXIT_FAILURE);
+    }
     
 
     signal(USER_TRIGGER, signal_handler);
