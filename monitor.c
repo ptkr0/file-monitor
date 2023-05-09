@@ -560,7 +560,7 @@ int main(int argc, char* argv[])
     if(option=='r')
         i=4;
     else
-        i=3;
+        i=3;    
     /* ./{daemon name} source_path destination_path */
     if (argc == i){
         syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
@@ -570,6 +570,7 @@ int main(int argc, char* argv[])
     {
         int* tmp_val=THR_TM(argv[i]);
         if(tmp_val[0]==0){
+            syslog(LOG_ERR, "Wrong formatting opt: <threshold size>:<sleep timer>! Using default values");
             syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
             syslog(LOG_NOTICE, "Using default sleep timer: %d s", MIMIR_TIME);
         }
