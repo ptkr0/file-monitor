@@ -375,6 +375,7 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
             {
                 copy_file(src_path, dest_path);
             }
+            /* Check if entry is a directory if it is create it and then go into list_directory again*/
             else if (is_dir(src_path)){
                 mkdir(dest_path, 0700);
                 syslog(LOG_NOTICE, "%s, %s", src_path,dest_path);
@@ -434,17 +435,20 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
                     copy_file(src_path, dest_path);
                 }
             }
+            /* Check if file is directory*/
             if (is_dir(src_path))
             {
                 if (file_exists(dest_path))
                 {
+                    /* Adjust file paths*/
                     add_slash(src_path);
                     add_slash(dest_path);
+                    /* Call on list_directory again*/
                     list_directory(src_path,dest_path,REGULAR_CHECK_REC);
                 }
                 else
                 {
-                    /* file is a regular file, but doesn't have a copy in dest folder -- we copy it */
+                    /* If directory does not exist we create it */
                     mkdir(dest_path, 0700);
                 }
             }
@@ -459,11 +463,15 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
         }
         else if (STATUS == DEST_CHECK_REC)
         {
+        /* Check if directory*/
         if(is_dir(src_path)){
+            /* Check if the directory exists exists */
             if (file_exists(src_path) && !(file_exists(dest_path))){
+                /* If its empty remove it*/
                 if(is_dir_empty(src_path)){
                 rmdir(src_path);
                 }
+                /*If not then call on list_directory function*/
                 else{
                 list_directory(src_path,dest_path,DEST_CHECK_REC);
                 }
@@ -473,7 +481,7 @@ void list_directory(const char* path_comparing, const char* path_to_compare, int
             }
 
         }
-            /* we go through dest dir and look if the same filenames are in the src dir -- if something is not in the src dir anymore we delete it from dest dir*/
+            /* If not a directory and is missing in source delete it in dest*/
         else{
             if (file_exists(src_path) && !(file_exists(dest_path)))
             {
@@ -492,10 +500,12 @@ int * THR_TM(char* option){
     char * token,s;
     int * wynik;
     int ck;
+    /*Check if user inputed only ':'*/
     if(strlen(option)==1&&option[0]==':'){
         ck=0;
     }
     else{
+        /* Check for the position of the separator and adjust ck value accordingly*/
         for(int i=0;i<strlen(option);i++)
         {
             
@@ -520,13 +530,8 @@ int * THR_TM(char* option){
             
         }
     }
-    if (ck==1){
-        token=strtok(option,":");
-        wynik=malloc(sizeof(int)*2);
-        wynik[0]=ck;
-        wynik[1]=atoi(token);
-    }
-    else if(ck==2){
+    /* Create an array in which the first value is the position of the seprator*/
+    if (ck==1 || ck==2){
         token=strtok(option,":");
         wynik=malloc(sizeof(int)*2);
         wynik[0]=ck;
@@ -540,6 +545,7 @@ int * THR_TM(char* option){
         token=strtok(NULL,":");
         wynik[2]=atoi(token);
     }
+    /*In case no option or only a separator*/
     else {
         wynik=malloc(sizeof(int)*1);
         wynik[0]=0;
@@ -561,13 +567,14 @@ int main(int argc, char* argv[])
         i=4;
     else
         i=3;    
-    /* ./{daemon name} source_path destination_path */
+    /* Check for user inputted values for threshhold and sleep timer*/
     if (argc == i){
         syslog(LOG_NOTICE, "Using default threshold value: %d MB", COPY_THRESHOLD/100000);
         syslog(LOG_NOTICE, "Using default sleep timer: %d s", MIMIR_TIME);
     }
     else if(argc == i+1)
     {
+        /*Call on the option string handler*/
         int* tmp_val=THR_TM(argv[i]);
         if(tmp_val[0]==0){
             syslog(LOG_ERR, "Wrong formatting opt: <threshold size>:<sleep timer>! Using default values");
