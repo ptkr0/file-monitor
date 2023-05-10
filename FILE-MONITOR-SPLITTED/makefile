@@ -1,5 +1,5 @@
 filemonitor: main.o skeleton.o readdir.o filefunc.o
-	gcc main.o skeleton.o readdir.o filefunc.o -o filemonitor
+	gcc main.o skeleton.o readdir.o filefunc.o -o filemonitor -lcrypto
 
 main.o: main.c common.h skeleton.h readdir.h filefunc.h
 	gcc -c main.c
