@@ -49,6 +49,28 @@ Aby wysłać żądanie synchronizacji plików należy użyć następującego pol
 kill -SIGUSR1 [PID_DEMONA]
 ```
 
+## Różnica pomiędzy kopiowaniem read/write a sendfile
+
+Nasz program wykorzystuje 2 metody kopiowania plików. Dla mniejszych jest to read/write, zaś dla większych sendfile.
+Sendfile jest rozwiązaniem szybszym dla dużych plików, ponieważ omija buforowanie danych w przestrzeni użytkownika.
+Przeprowadziliśmy prosty test kopiując plik o wielkości 100MB przy użyciu 2 metod:
+
+read/write:
+```sh
+real	0m0,220s
+user	0m0,013s
+sys	0m0,183s
+```
+
+sendfile:
+```sh
+real	0m0,067s
+user	0m0,000s
+sys	0m0,062s
+```
+
+Jak widać różnica jest znaczna co przy kopiowaniu wielu różnych plików w niewielkich odstępach czasu ma ogromne znaczenie.
+
 ## Autorzy
 
 Piotr Radziszewski
