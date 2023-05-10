@@ -29,7 +29,7 @@ make
 Aby poprawnie uruchomić demona należy skorzystać z następującej składni:
 
 ```sh
-./filemonitor [ŚCIEŻKA_KATALOGU_ŹRÓDŁOWEGO] [ŚCIEŻKA_KATALOGU_DOCELOWEGO] [PRÓG_WIELKOŚCI]:[CZAS_POMIĘDZY_SKANOWANIEM] [OPT: -R]
+./filemonitor [ŚCIEŻKA_KATALOGU_ŹRÓDŁOWEGO] [ŚCIEŻKA_KATALOGU_DOCELOWEGO] [OPT: -R] [PRÓG_WIELKOŚCI]:[CZAS_POMIĘDZY_SKANOWANIEM]
 ```
 
 - Opcja -R uruchamiania rekurencyjną synchronizację plików
@@ -73,7 +73,7 @@ Jak widać różnica jest znaczna co przy kopiowaniu wielu różnych plików w n
 
 ## Autorzy
 
-Piotr Radziszewski
+Piotr Radziszewski\
 Dawid Szymański
 
 
